@@ -1,0 +1,28 @@
+{
+  "celestialBodies": [
+    {
+      "id": 1,
+      "x": 300,
+      "y": 250,
+      "mass": 5000,
+      "radius": 30,
+      "color": "#FF6B6B"
+    },
+    {
+      "id": 2,
+      "x": 500,
+      "y": 300,
+      "mass": 3000,
+      "radius": 22,
+      "color": "#4ECDC4"
+    },
+    {
+      "id": 3,
+      "x": 400,
+      "y": 450,
+      "mass": 2000,
+      "radius": 18,
+      "color": "#FFE66D"
+    }
+  ]
+}

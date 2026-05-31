@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>性能测试 - 重力场可视化</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a2e;
+            color: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        canvas {
+            border: 2px solid #4ECDC4;
+            background: rgba(0,0,0,0.3);
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4ECDC4;
+        }
+        .log {
+            background: rgba(0,0,0,0.5);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4ECDC4;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #3dbdb5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ 重力场可视化性能测试</h1>
+        
+        <div>
+            <button onclick="startPerformanceTest()">开始性能测试</button>
+            <button onclick="simulateDrag()">模拟拖拽测试</button>
+            <button onclick="clearLog()">清空日志</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div>FPS</div>
+                <div class="stat-value" id="fps">0</div>
+            </div>
+            <div class="stat-card">
+                <div>单帧耗时</div>
+                <div class="stat-value" id="frameTime">0ms</div>
+            </div>
+            <div class="stat-card">
+                <div>潜在问题</div>
+                <div class="stat-value" id="issues">0</div>
+            </div>
+        </div>
+
+        <canvas id="testCanvas" width="800" height="600"></canvas>
+        
+        <h3>📋 测试日志</h3>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        const G = 100;
+        let celestialBodies = [
+            { id: 1, x: 300, y: 250, mass: 5000, radius: 30, color: '#FF6B6B' },
+            { id: 2, x: 500, y: 300, mass: 3000, radius: 22, color: '#4ECDC4' },
+            { id: 3, x: 400, y: 450, mass: 2000, radius: 18, color: '#FFE66D' }
+        ];
+
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let frameCount = 0;
+        let lastTime = performance.now();
+        let fpsHistory = [];
+        let frameTimeHistory = [];
+        let performanceIssues = 0;
+        let isRunning = false;
+
+        function log(message) {
+            const logEl = document.getElementById('log');
+            logEl.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        function calculatePotential(x, y) {
+            let potential = 0;
+            for (const body of celestialBodies) {
+                const dx = x - body.x;
+                const dy = y - body.y;
+                const r = Math.sqrt(dx * dx + dy * dy);
+                if (r > body.radius) {
+                    potential -= G * body.mass / r;
+                } else {
+                    potential -= G * body.mass / body.radius;
+                }
+            }
+            return potential;
+        }
+
+        function drawEquipotentialLines() {
+            const levels = [-500, -400, -300, -250, -200, -150, -100, -50, -20];
+            const colors = [
+                'rgba(0, 50, 100, 0.6)',
+                'rgba(0, 80, 140, 0.55)',
+                'rgba(0, 110, 180, 0.5)',
+                'rgba(20, 140, 200, 0.45)',
+                'rgba(40, 170, 220, 0.4)',
+                'rgba(60, 190, 230, 0.35)',
+                'rgba(100, 200, 240, 0.3)',
+                'rgba(140, 220, 250, 0.25)',
+                'rgba(180, 230, 255, 0.2)'
+            ];
+            
+            const step = 8;
+            
+            for (let i = 0; i < levels.length; i++) {
+                ctx.strokeStyle = colors[i];
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                
+                for (let y = 0; y <= canvas.height; y += step) {
+                    for (let x = 0; x <= canvas.width; x += step) {
+                        const bl = calculatePotential(x, y);
+                        const br = calculatePotential(x + step, y);
+                        const tl = calculatePotential(x, y + step);
+                        const tr = calculatePotential(x + step, y + step);
+                        
+                        const caseCode = 
+                            (bl < levels[i] ? 1 : 0) +
+                            (br < levels[i] ? 2 : 0) +
+                            (tr < levels[i] ? 4 : 0) +
+                            (tl < levels[i] ? 8 : 0);
+                        
+                        if (caseCode === 0 || caseCode === 15) continue;
+                        
+                        const t = (v1, v2) => (levels[i] - v1) / (v2 - v1);
+                        
+                        switch (caseCode) {
+                            case 1: case 14:
+                                ctx.moveTo(x, y + t(bl, tl) * step);
+                                ctx.lineTo(x + t(bl, br) * step, y);
+                                break;
+                            case 2: case 13:
+                                ctx.moveTo(x + t(bl, br) * step, y);
+                                ctx.lineTo(x + step, y + t(br, tr) * step);
+                                break;
+                            case 3: case 12:
+                                ctx.moveTo(x, y + t(bl, tl) * step);
+                                ctx.lineTo(x + step, y + t(br, tr) * step);
+                                break;
+                            case 4: case 11:
+                                ctx.moveTo(x + step, y + t(br, tr) * step);
+                                ctx.lineTo(x + t(tl, tr) * step, y + step);
+                                break;
+                            case 6: case 9:
+                                ctx.moveTo(x + t(bl, br) * step, y);
+                                ctx.lineTo(x + t(tl, tr) * step, y + step);
+                                break;
+                            case 7: case 8:
+                                ctx.moveTo(x, y + t(bl, tl) * step);
+                                ctx.lineTo(x + t(tl, tr) * step, y + step);
+                                break;
+                        }
+                    }
+                }
+                ctx.stroke();
+            }
+        }
+
+        function drawCelestialBodies() {
+            for (const body of celestialBodies) {
+                ctx.beginPath();
+                ctx.arc(body.x, body.y, body.radius, 0, Math.PI * 2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function render() {
+            const frameStart = performance.now();
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawEquipotentialLines();
+            drawCelestialBodies();
+            
+            const frameEnd = performance.now();
+            const frameTime = frameEnd - frameStart;
+            frameTimeHistory.push(frameTime);
+            
+            frameCount++;
+            const now = performance.now();
+            if (now - lastTime >= 1000) {
+                const fps = frameCount * 1000 / (now - lastTime);
+                fpsHistory.push(fps);
+                document.getElementById('fps').textContent = fps.toFixed(1);
+                frameCount = 0;
+                lastTime = now;
+                
+                if (fps < 30) {
+                    performanceIssues++;
+                    document.getElementById('issues').textContent = performanceIssues;
+                    log(`⚠️ FPS低于30: ${fps.toFixed(1)}`);
+                }
+            }
+            
+            const avgFrameTime = frameTimeHistory.slice(-60).reduce((a, b) => a + b, 0) / Math.min(60, frameTimeHistory.length);
+            document.getElementById('frameTime').textContent = avgFrameTime.toFixed(1) + 'ms';
+            
+            if (frameTime > 50) {
+                performanceIssues++;
+                document.getElementById('issues').textContent = performanceIssues;
+            }
+            
+            if (isRunning) {
+                requestAnimationFrame(render);
+            }
+        }
+
+        function startPerformanceTest() {
+            log('🚀 开始性能测试...');
+            isRunning = true;
+            frameCount = 0;
+            lastTime = performance.now();
+            fpsHistory = [];
+            frameTimeHistory = [];
+            performanceIssues = 0;
+            
+            render();
+            
+            setTimeout(() => {
+                isRunning = false;
+                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+                const avgFrameTime = frameTimeHistory.reduce((a, b) => a + b, 0) / frameTimeHistory.length;
+                
+                log('📊 性能测试结果:');
+                log(`   平均FPS: ${avgFps.toFixed(1)}`);
+                log(`   平均帧耗时: ${avgFrameTime.toFixed(2)}ms`);
+                log(`   性能问题数: ${performanceIssues}`);
+                
+                if (avgFps >= 50 && avgFrameTime < 20) {
+                    log('✅ 性能优秀！');
+                } else if (avgFps >= 30) {
+                    log('⚠️ 性能一般，建议优化');
+                } else {
+                    log('❌ 性能较差，需要优化');
+                }
+            }, 5000);
+        }
+
+        function simulateDrag() {
+            log('🖱️ 模拟天体拖拽测试...');
+            isRunning = true;
+            
+            let dragProgress = 0;
+            const startX = celestialBodies[0].x;
+            const startY = celestialBodies[0].y;
+            const endX = 500;
+            const endY = 400;
+            
+            function dragStep() {
+                if (dragProgress <= 1) {
+                    celestialBodies[0].x = startX + (endX - startX) * dragProgress;
+                    celestialBodies[0].y = startY + (endY - startY) * dragProgress;
+                    dragProgress += 0.02;
+                    
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    drawEquipotentialLines();
+                    drawCelestialBodies();
+                    
+                    requestAnimationFrame(dragStep);
+                } else {
+                    log('✅ 拖拽模拟完成，等势线实时更新');
+                    isRunning = false;
+                }
+            }
+            
+            dragStep();
+        }
+
+        log('📝 性能测试页面加载完成');
+        log('   - 点击"开始性能测试"运行5秒基准测试');
+        log('   - 点击"模拟拖拽测试"测试拖动时的重绘性能');
+    </script>
+</body>
+</html>

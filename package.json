@@ -1,0 +1,15 @@
+{
+  "name": "gravity-potential-visualizer",
+  "version": "1.0.0",
+  "description": "重力场势能可视化应用",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "keywords": ["gravity", "potential", "visualization", "canvas"]
+}

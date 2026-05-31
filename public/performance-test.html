@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>性能对比测试 - Web Worker vs 主线程计算</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .test-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .panel-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 500px;
+            display: block;
+            margin: 0 auto;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .metric {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .metric-label {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #4ECDC4;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        .log-container {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .log-info { color: #4ECDC4; }
+        .log-success { color: #51cf66; }
+        .log-warning { color: #ffd43b; }
+        .log-error { color: #ff6b6b; }
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, rgba(78, 205, 196, 0.2), rgba(102, 126, 234, 0.2));
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 1em;
+            color: #4ECDC4;
+        }
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: white;
+        }
+        .stat-card .unit {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ Web Worker vs 主线程计算 性能对比测试</h1>
+
+        <div class="controls">
+            <button onclick="startTest('mainthread')">测试主线程计算</button>
+            <button onclick="startTest('worker')">测试Worker计算</button>
+            <button onclick="startBothTests()">同时测试对比</button>
+            <button onclick="resetTests()">重置</button>
+        </div>
+
+        <div class="test-section">
+            <div class="test-panel">
+                <div class="panel-title">🔵 主线程计算模式</div>
+                <canvas id="canvasMain" width="500" height="375"></canvas>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-label">FPS</div>
+                        <div class="metric-value" id="fpsMain">0</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">计算耗时</div>
+                        <div class="metric-value" id="calcMain">0ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">帧间隔</div>
+                        <div class="metric-value" id="frameMain">0ms</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="test-panel">
+                <div class="panel-title">🟢 Web Worker模式</div>
+                <canvas id="canvasWorker" width="500" height="375"></canvas>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-label">FPS</div>
+                        <div class="metric-value" id="fpsWorker">0</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">计算耗时</div>
+                        <div class="metric-value" id="calcWorker">0ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">帧间隔</div>
+                        <div class="metric-value" id="frameWorker">0ms</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-summary">
+            <div class="stat-card">
+                <h3>FPS提升</h3>
+                <div class="value" id="fpsImprove">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>响应速度</h3>
+                <div class="value" id="responseScore">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>卡顿次数</h3>
+                <div class="value" id="freezeCount">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>综合评分</h3>
+                <div class="value" id="overallScore">-</div>
+            </div>
+        </div>
+
+        <div class="log-container" id="logContainer"></div>
+    </div>
+
+    <script>
+        const G = 100;
+        const celestialBodies = [
+            { id: 1, x: 150, y: 125, mass: 5000, radius: 30, color: '#FF6B6B' },
+            { id: 2, x: 250, y: 150, mass: 3000, radius: 22, color: '#4ECDC4' },
+            { id: 3, x: 200, y: 225, mass: 2000, radius: 18, color: '#FFE66D' }
+        ];
+
+        let testRunning = false;
+        let testDuration = 5000;
+        let frameCountMain = 0;
+        let frameCountWorker = 0;
+        let lastFrameTimeMain = 0;
+        let lastFrameTimeWorker = 0;
+        let frameTimesMain = [];
+        let frameTimesWorker = [];
+        let calcTimesMain = [];
+        let calcTimesWorker = [];
+        let freezesMain = 0;
+        let freezesWorker = 0;
+
+        function log(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function calculatePotential(x, y) {
+            let potential = 0;
+            for (const body of celestialBodies) {
+                const dx = x - body.x;
+                const dy = y - body.y;
+                const r = Math.sqrt(dx * dx + dy * dy);
+                if (r > body.radius) {
+                    potential -= G * body.mass / r;
+                } else {
+                    potential -= G * body.mass / body.radius;
+                }
+            }
+            return potential;
+        }
+
+        function drawLinesMain(ctx) {
+            const startTime = performance.now();
+            const step = 12;
+            const levels = [-500, -400, -300, -250, -200, -150, -100, -50, -20];
+            const colors = [
+                'rgba(0, 50, 100, 0.6)',
+                'rgba(0, 80, 140, 0.55)',
+                'rgba(0, 110, 180, 0.5)',
+                'rgba(20, 140, 200, 0.45)',
+                'rgba(40, 170, 220, 0.4)',
+                'rgba(60, 190, 230, 0.35)',
+                'rgba(100, 200, 240, 0.3)',
+                'rgba(140, 220, 250, 0.25)',
+                'rgba(180, 230, 255, 0.2)'
+            ];
+
+            for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+                const level = levels[levelIndex];
+                ctx.strokeStyle = colors[levelIndex];
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+
+                for (let y = 0; y < 375; y += step) {
+                    for (let x = 0; x < 500; x += step) {
+                        const bl = calculatePotential(x, y);
+                        const br = calculatePotential(x + step, y);
+                        const tl = calculatePotential(x, y + step);
+                        const tr = calculatePotential(x + step, y + step);
+
+                        const caseCode =
+                            (bl < level ? 1 : 0) +
+                            (br < level ? 2 : 0) +
+                            (tr < level ? 4 : 0) +
+                            (tl < level ? 8 : 0);
+
+                        if (caseCode === 0 || caseCode === 15) continue;
+
+                        const interpolate = (a, b, t) => a + (b - a) * t;
+
+                        if (caseCode === 1 || caseCode === 14) {
+                            const tx = interpolate(x, x + step, (level - bl) / (br - bl));
+                            const ty = interpolate(y, y + step, (level - bl) / (tl - bl));
+                            ctx.moveTo(x, ty);
+                            ctx.lineTo(tx, y);
+                        }
+                    }
+                }
+                ctx.stroke();
+            }
+
+            const calcTime = performance.now() - startTime;
+            calcTimesMain.push(calcTime);
+            return calcTime;
+        }
+
+        let worker = null;
+        let workerResult = null;
+
+        function initWorker() {
+            const workerCode = `
+                const G = 100;
+                let bodies = ${JSON.stringify(celestialBodies)};
+
+                function calculatePotential(x, y) {
+                    let potential = 0;
+                    for (const body of bodies) {
+                        const dx = x - body.x;
+                        const dy = y - body.y;
+                        const r = Math.sqrt(dx * dx + dy * dy);
+                        if (r > body.radius) {
+                            potential -= G * body.mass / r;
+                        } else {
+                            potential -= G * body.mass / body.radius;
+                        }
+                    }
+                    return potential;
+                }
+
+                self.onmessage = function(e) {
+                    const startTime = performance.now();
+                    const step = 12;
+                    const levels = [-500, -400, -300, -250, -200, -150, -100, -50, -20];
+                    const allSegments = [];
+
+                    for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+                        const level = levels[levelIndex];
+                        const segments = [];
+
+                        for (let y = 0; y < 375; y += step) {
+                            for (let x = 0; x < 500; x += step) {
+                                const bl = calculatePotential(x, y);
+                                const br = calculatePotential(x + step, y);
+                                const tl = calculatePotential(x, y + step);
+                                const tr = calculatePotential(x + step, y + step);
+
+                                const caseCode =
+                                    (bl < level ? 1 : 0) +
+                                    (br < level ? 2 : 0) +
+                                    (tr < level ? 4 : 0) +
+                                    (tl < level ? 8 : 0);
+
+                                if (caseCode === 0 || caseCode === 15) continue;
+
+                                if (caseCode === 1 || caseCode === 14) {
+                                    const tX = (level - bl) / (br - bl);
+                                    const tY = (level - bl) / (tl - bl);
+                                    segments.push({
+                                        x1: x, y1: y + tY * step,
+                                        x2: x + tX * step, y2: y
+                                    });
+                                }
+                            }
+                        }
+                        allSegments.push({ level, segments, colorIndex: levelIndex });
+                    }
+
+                    self.postMessage({
+                        segments: allSegments,
+                        calcTime: performance.now() - startTime
+                    });
+                };
+            `;
+
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            worker = new Worker(URL.createObjectURL(blob));
+
+            worker.onmessage = function(e) {
+                workerResult = e.data;
+                calcTimesWorker.push(e.data.calcTime);
+            };
+        }
+
+        function renderMainThread() {
+            const canvas = document.getElementById('canvasMain');
+            const ctx = canvas.getContext('2d');
+            const startTime = performance.now();
+
+            ctx.clearRect(0, 0, 500, 375);
+            const calcTime = drawLinesMain(ctx);
+
+            for (const body of celestialBodies) {
+                ctx.beginPath();
+                ctx.arc(body.x, body.y, body.radius, 0, Math.PI * 2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+            }
+
+            const frameTime = performance.now() - startTime;
+            frameTimesMain.push(frameTime);
+
+            if (frameTime > 50) freezesMain++;
+
+            frameCountMain++;
+
+            if (testRunning) {
+                requestAnimationFrame(renderMainThread);
+            }
+        }
+
+        function renderWorker() {
+            const canvas = document.getElementById('canvasWorker');
+            const ctx = canvas.getContext('2d');
+            const startTime = performance.now();
+
+            ctx.clearRect(0, 0, 500, 375);
+
+            if (workerResult) {
+                const colors = [
+                    'rgba(0, 50, 100, 0.6)',
+                    'rgba(0, 80, 140, 0.55)',
+                    'rgba(0, 110, 180, 0.5)',
+                    'rgba(20, 140, 200, 0.45)',
+                    'rgba(40, 170, 220, 0.4)',
+                    'rgba(60, 190, 230, 0.35)',
+                    'rgba(100, 200, 240, 0.3)',
+                    'rgba(140, 220, 250, 0.25)',
+                    'rgba(180, 230, 255, 0.2)'
+                ];
+
+                for (const lineData of workerResult.segments) {
+                    ctx.strokeStyle = colors[lineData.colorIndex % colors.length];
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+
+                    for (const seg of lineData.segments) {
+                        ctx.moveTo(seg.x1, seg.y1);
+                        ctx.lineTo(seg.x2, seg.y2);
+                    }
+                    ctx.stroke();
+                }
+            }
+
+            for (const body of celestialBodies) {
+                ctx.beginPath();
+                ctx.arc(body.x, body.y, body.radius, 0, Math.PI * 2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+            }
+
+            const frameTime = performance.now() - startTime;
+            frameTimesWorker.push(frameTime);
+
+            if (frameTime > 50) freezesWorker++;
+
+            if (worker) {
+                worker.postMessage({ type: 'calculate' });
+            }
+
+            frameCountWorker++;
+
+            if (testRunning) {
+                requestAnimationFrame(renderWorker);
+            }
+        }
+
+        function updateMetrics() {
+            if (!testRunning) return;
+
+            const avgCalcMain = calcTimesMain.length > 0 ?
+                (calcTimesMain.reduce((a, b) => a + b, 0) / calcTimesMain.length).toFixed(1) : 0;
+            const avgCalcWorker = calcTimesWorker.length > 0 ?
+                (calcTimesWorker.reduce((a, b) => a + b, 0) / calcTimesWorker.length).toFixed(1) : 0;
+
+            const avgFrameMain = frameTimesMain.length > 0 ?
+                (frameTimesMain.reduce((a, b) => a + b, 0) / frameTimesMain.length).toFixed(1) : 0;
+            const avgFrameWorker = frameTimesWorker.length > 0 ?
+                (frameTimesWorker.reduce((a, b) => a + b, 0) / frameTimesWorker.length).toFixed(1) : 0;
+
+            document.getElementById('fpsMain').textContent = Math.round(frameCountMain / (testDuration / 1000));
+            document.getElementById('fpsWorker').textContent = Math.round(frameCountWorker / (testDuration / 1000));
+            document.getElementById('calcMain').textContent = avgCalcMain + 'ms';
+            document.getElementById('calcWorker').textContent = avgCalcWorker + 'ms';
+            document.getElementById('frameMain').textContent = avgFrameMain + 'ms';
+            document.getElementById('frameWorker').textContent = avgFrameWorker + 'ms';
+
+            requestAnimationFrame(updateMetrics);
+        }
+
+        function calculateStats() {
+            const fpsMain = Math.round(frameCountMain / (testDuration / 1000));
+            const fpsWorker = Math.round(frameCountWorker / (testDuration / 1000));
+            const fpsImprove = fpsMain > 0 ? Math.round(((fpsWorker - fpsMain) / fpsMain) * 100) : 0;
+
+            document.getElementById('fpsImprove').textContent = (fpsImprove > 0 ? '+' : '') + fpsImprove + '%';
+
+            const avgFrameMain = frameTimesMain.reduce((a, b) => a + b, 0) / frameTimesMain.length;
+            const avgFrameWorker = frameTimesWorker.reduce((a, b) => a + b, 0) / frameTimesWorker.length;
+            const responseScore = Math.round((avgFrameMain / avgFrameWorker) * 100);
+
+            document.getElementById('responseScore').textContent = responseScore + '%';
+            document.getElementById('freezeCount').textContent = freezesMain + ' vs ' + freezesWorker;
+
+            const overallScore = Math.round(
+                (Math.min(fpsWorker / 60, 1) * 40) +
+                (Math.min(avgFrameMain / avgFrameWorker, 3) * 30) +
+                (Math.max(0, 1 - freezesMain / 10) * 30)
+            );
+            document.getElementById('overallScore').textContent = overallScore + '/100';
+
+            log('测试完成！', 'success');
+            log(`主线程: ${fpsMain} FPS, 平均帧耗时: ${avgFrameMain.toFixed(1)}ms, 卡顿: ${freezesMain}次`, 'info');
+            log(`Worker: ${fpsWorker} FPS, 平均帧耗时: ${avgFrameWorker.toFixed(1)}ms, 卡顿: ${freezesWorker}次`, 'success');
+            log(`FPS提升: ${fpsImprove}%, 响应速度提升: ${Math.round((avgFrameMain / avgFrameWorker - 1) * 100)}%`, 'success');
+        }
+
+        function startTest(mode) {
+            if (testRunning) return;
+
+            log(`开始${mode === 'mainthread' ? '主线程' : 'Worker'}模式测试...`, 'info');
+            resetTests();
+            testRunning = true;
+
+            if (mode === 'mainthread' || mode === 'both') {
+                renderMainThread();
+            }
+            if (mode === 'worker' || mode === 'both') {
+                initWorker();
+                renderWorker();
+            }
+
+            updateMetrics();
+
+            setTimeout(() => {
+                testRunning = false;
+                calculateStats();
+            }, testDuration);
+        }
+
+        function startBothTests() {
+            startTest('both');
+        }
+
+        function resetTests() {
+            testRunning = false;
+            frameCountMain = 0;
+            frameCountWorker = 0;
+            frameTimesMain = [];
+            frameTimesWorker = [];
+            calcTimesMain = [];
+            calcTimesWorker = [];
+            freezesMain = 0;
+            freezesWorker = 0;
+
+            if (worker) {
+                worker.terminate();
+                worker = null;
+            }
+
+            document.getElementById('fpsMain').textContent = '0';
+            document.getElementById('fpsWorker').textContent = '0';
+            document.getElementById('calcMain').textContent = '0ms';
+            document.getElementById('calcWorker').textContent = '0ms';
+            document.getElementById('frameMain').textContent = '0ms';
+            document.getElementById('frameWorker').textContent = '0ms';
+            document.getElementById('fpsImprove').textContent = '-';
+            document.getElementById('responseScore').textContent = '-';
+            document.getElementById('freezeCount').textContent = '-';
+            document.getElementById('overallScore').textContent = '-';
+
+            log('测试已重置', 'info');
+        }
+
+        log('性能测试页面加载完成', 'success');
+        log('点击按钮开始测试对比', 'info');
+    </script>
+</body>
+</html>
